@@ -363,11 +363,13 @@ enum {
 #define NOTE_TRACKERR   0x00000002              /* could not track child */
 #define NOTE_CHILD      0x00000004              /* am a child process */
 
+#include <sys/queue.h>
+struct proc;
+struct knote;
+SLIST_HEAD(klist, knote);
 
-
-
-
-
-
+/* Flags for pending events notified by kernel via return-to-kernel ast */
+#define R2K_WORKLOOP_PENDING_EVENTS             0x1
+#define R2K_WORKQ_PENDING_EVENTS                0x2
 
 #endif /* !_SYS_EVENT_H_ */
