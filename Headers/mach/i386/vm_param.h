@@ -77,14 +77,14 @@
  */
 
 /*
- *	File:	vm_param.h
- *	Author:	Avadis Tevanian, Jr.
- *	Date:	1985
+ *  File:   vm_param.h
+ *  Author: Avadis Tevanian, Jr.
+ *  Date:   1985
  *
- *	I386 machine dependent virtual memory parameters.
- *	Most of the declarations are preceeded by I386_ (or i386_)
- *	which is OK because only I386 specific code will be using
- *	them.
+ *  I386 machine dependent virtual memory parameters.
+ *  Most of the declarations are preceeded by I386_ (or i386_)
+ *  which is OK because only I386 specific code will be using
+ *  them.
  */
 
 #ifndef _MACH_I386_VM_PARAM_H_
@@ -112,8 +112,8 @@
 #define I386_LPGMASK            (I386_LPGBYTES-1)
 
 /*
- *	Convert bytes to pages and convert pages to bytes.
- *	No rounding is used.
+ *  Convert bytes to pages and convert pages to bytes.
+ *  No rounding is used.
  */
 
 #define i386_btop(x)            ((ppnum_t)((x) >> I386_PGSHIFT))
@@ -122,13 +122,13 @@
 #define machine_ptob(x)         i386_ptob(x)
 
 /*
- *	Round off or truncate to the nearest page.  These will work
- *	for either addresses or counts.  (i.e. 1 byte rounds to 1 page
- *	bytes.
+ *  Round off or truncate to the nearest page.  These will work
+ *  for either addresses or counts.  (i.e. 1 byte rounds to 1 page
+ *  bytes.
  */
 
 #define i386_round_page(x)      ((((pmap_paddr_t)(x)) + I386_PGBYTES - 1) & \
-	                                ~(I386_PGBYTES-1))
+                                    ~(I386_PGBYTES-1))
 #define i386_trunc_page(x)      (((pmap_paddr_t)(x)) & ~(I386_PGBYTES-1))
 
 
@@ -165,6 +165,41 @@
 #define VM_USRSTACK32           ((vm_offset_t) 0xC0000000)      /* ASLR slides stack down by up to 1 MB */
 #define VM_MAX_ADDRESS          ((vm_offset_t) 0xFFE00000)
 
+/*
+ * XXX
+ * The kernel max VM address is limited to 0xFF3FFFFF for now because
+ * some data structures are explicitly allocated at 0xFF400000 without
+ * VM's knowledge (see osfmk/i386/locore.s for the allocation of PTmap and co.).
+ * We can't let VM allocate memory from there.
+ */
 
+/*
+ * +-----------------------+--------+--------+------------------------+
+ * | 0xffff_ffff_ffff_efff |  -4096 | ~512GB | VM_MAX_KERNEL_ADDRESS  |
+ * +-----------------------+--------+--------+------------------------+
+ * | 0xffff_ff80_0000_0000 | -512GB |    0GB | VM_MIN_KERNEL_ADDRESS  |
+ * |                       |        |        | PMAP_HEAP_RANGE_START  |
+ * +-----------------------+--------+--------+------------------------+
+ */
+
+#define KERNEL_IMAGE_TO_PHYS(x) (x)
+#define VM_KERNEL_POINTER_SIGNIFICANT_BITS 39
+#define VM_MIN_KERNEL_ADDRESS           ((vm_offset_t) 0xFFFFFF8000000000UL)
+#define VM_MIN_KERNEL_PAGE              ((ppnum_t)0)
+#define VM_MIN_KERNEL_AND_KEXT_ADDRESS  (VM_MIN_KERNEL_ADDRESS - 0x80000000ULL)
+#define VM_MAX_KERNEL_ADDRESS           ((vm_offset_t) 0xFFFFFFFFFFFFEFFFUL)
+#define VM_MAX_KERNEL_ADDRESS_EFI32     ((vm_offset_t) 0xFFFFFF80FFFFEFFFUL)
+#define KEXT_ALLOC_MAX_OFFSET           (2 * 1024 * 1024 * 1024UL)
+#define KEXT_ALLOC_BASE(x)              ((x) - KEXT_ALLOC_MAX_OFFSET)
+#define KEXT_ALLOC_SIZE(x)              (KEXT_ALLOC_MAX_OFFSET - (x))
+
+#define VM_KERNEL_STRIP_PTR(_v) (_v)
+
+#define VM_KERNEL_ADDRESS(va) \
+    (((vm_address_t)(va) >= VM_MIN_KERNEL_AND_KEXT_ADDRESS) && \
+    ((vm_address_t)(va)  <= VM_MAX_KERNEL_ADDRESS))
+
+#define VM_MAP_MIN_ADDRESS      MACH_VM_MIN_ADDRESS
+#define VM_MAP_MAX_ADDRESS      MACH_VM_MAX_ADDRESS
 
 #endif  /* _MACH_I386_VM_PARAM_H_ */
