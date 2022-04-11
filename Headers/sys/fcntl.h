@@ -126,6 +126,7 @@
 #define O_EXCL          0x0800          /* error if already exists */
 #define FMARK           0x1000          /* mark during gc() */
 #define FDEFER          0x2000          /* defer for next gc pass */
+#define FWASLOCKED      0x00004000      /* has or has had an advisory fcntl lock */
 #define FHASLOCK        0x4000          /* descriptor holds advisory lock */
 
 #if __DARWIN_C_LEVEL >= 200809L
