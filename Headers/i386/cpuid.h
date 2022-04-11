@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000-2020 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -39,14 +39,18 @@
 
 #include <sys/appleapiopts.h>
 
-
-#ifdef __APPLE_API_PRIVATE
+#include <i386/hw_defs.h>
+#include <i386/pio.h>
+#include <i386/machine_routines.h>
 
 #define CPUID_VID_INTEL         "GenuineIntel"
 #define CPUID_VID_AMD           "AuthenticAMD"
 
-#define CPUID_VMM_ID_VMWARE             "VMwareVMware"
+#define CPUID_VMM_ID_VMWARE     "VMwareVMware"
 #define CPUID_VMM_ID_PARALLELS  "Parallels\0\0\0"
+#define CPUID_VMM_ID_HYVE       "bhyve bhyve "
+#define CPUID_VMM_ID_HVF        "HVFHVFHVFHVF"
+#define CPUID_VMM_ID_KVM        "KVMKVMKVM\0\0\0"
 
 #define CPUID_STRING_UNKNOWN    "Unknown CPU Typ"
 
@@ -277,9 +281,38 @@
 #define CPUID_MODEL_COMETLAKE_DT        0xA5
 #endif /* not RC_HIDE_XNU_COMETLAKE */
 
-#define CPUID_VMM_FAMILY_UNKNOWN        0x0
-#define CPUID_VMM_FAMILY_VMWARE         0x1
-#define CPUID_VMM_FAMILY_PARALLELS      0x2
+#define CPUID_VMM_FAMILY_NONE           0x0
+#define CPUID_VMM_FAMILY_UNKNOWN        0x1
+#define CPUID_VMM_FAMILY_VMWARE         0x2
+#define CPUID_VMM_FAMILY_PARALLELS      0x3
+#define CPUID_VMM_FAMILY_HYVE           0x4
+#define CPUID_VMM_FAMILY_HVF            0x5
+#define CPUID_VMM_FAMILY_KVM            0x6
+
+
+#if DEBUG || DEVELOPMENT
+
+/*
+ * Apple Paravirtualization CPUID leaves
+ * The base leaf can be placed at any unused 0x100 aligned boundary
+ * in the hypervisor class leaves [0x4000_0000-0x4001_0000].
+ */
+
+#define APPLEPV_INTERFACE_LEAF_INDEX    1
+#define APPLEPV_FEATURES_LEAF_INDEX     2
+#define APPLEPV_LEAF_INDEX_MAX          APPLEPV_FEATURES_LEAF_INDEX
+
+#define APPLEPV_SIGNATURE               "apple-pv-xnu"
+#define APPLEPV_INTERFACE               "AH#1"
+
+/*
+ *  Apple Hypercall Feature Vector:
+ *  Values in ECX:EDX returned by the base leaf
+ */
+
+#define CPUID_LEAF_FEATURE_COREDUMP         _Bit(0)
+
+#endif /* DEBUG || DEVELOPMENT */
 
 #ifndef ASSEMBLER
 #include <stdint.h>
@@ -380,7 +413,7 @@ typedef struct {
 } cpuid_tsc_leaf_t;
 
 /* Physical CPU info - this is exported out of the kernel (kexts), so be wary of changes */
-typedef struct {
+typedef struct i386_cpu_info {
 	char            cpuid_vendor[16];
 	char            cpuid_brand_string[48];
 	const char      *cpuid_model_string;
@@ -458,6 +491,55 @@ typedef struct {
 	cpuid_xsave_leaf_t      cpuid_xsave_leaf[2];
 } i386_cpu_info_t;
 
+/* Only for 32bit values */
+#define bit32(n)                (1U << (n))
+#define bitmask32(h, l)          ((bit32(h)|(bit32(h)-1)) & ~(bit32(l)-1))
+#define bitfield32(x, h, l)       ((((x) & bitmask32(h,l)) >> l))
+
+typedef struct {
+	char            cpuid_vmm_vendor[16];
+	uint32_t        cpuid_vmm_family;
+	uint32_t        cpuid_vmm_bus_frequency;
+	uint32_t        cpuid_vmm_tsc_frequency;
+	uint64_t        cpuid_vmm_applepv_features;
+} i386_vmm_info_t;
+
+typedef enum {
+	CPU_INTEL_SEGCHK = 1,
+	CPU_INTEL_TSXFA = 2,
+	CPU_INTEL_TSXDA = 4,
+	CPU_INTEL_SRBDS = 8
+} cpu_wa_e;
+
+typedef enum {
+	CWA_ON = 2,
+	CWA_FORCE_ON = 3,       /* FORCE_ON shares bit 1 so consumers can test that for ON */
+	CWA_OFF = 4,
+	CWA_FORCE_OFF = 5       /* Similarly for FORCE_OFF sharing bit 2 */
+} cwa_classifier_e;
+
+static inline int
+is_xeon_sp(uint8_t platid)
+{
+	if (platid == PLATID_XEON_SP_1 || platid == PLATID_XEON_SP_2) {
+		return 1;
+	}
+	if (platid != PLATID_MAYBE_XEON_SP) {
+		return 0;
+	}
+
+	boolean_t intrs = ml_set_interrupts_enabled(FALSE);
+	outl(cfgAdr, XeonCapID5);
+	uint32_t cap5reg = inl(cfgDat);
+	ml_set_interrupts_enabled(intrs);
+	/* Read from PCI config space 1:30:3:0x98 [bits 13:9] */
+	if (bitfield32(cap5reg, 13, 9) == 3) {
+		return 1;
+	}
+	return 0;
+}
+
+extern int force_tecs_at_idle;
 
 #ifdef __cplusplus
 extern "C" {
@@ -485,7 +567,17 @@ extern uint32_t         cpuid_cpufamily(void);
 
 extern i386_cpu_info_t  *cpuid_info(void);
 extern void             cpuid_set_info(void);
+extern boolean_t        cpuid_vmm_present(void);
+extern uint32_t         cpuid_vmm_family(void);
 
+#if DEBUG || DEVELOPMENT
+extern uint64_t         cpuid_vmm_get_applepv_features(void);
+#endif /* DEBUG || DEVELOPMENT */
+
+extern i386_vmm_info_t  *cpuid_vmm_info(void);
+extern cwa_classifier_e cpuid_wa_required(cpu_wa_e wa);
+extern void cpuid_do_was(void);
+extern const char       *cpuid_vmm_family_string(void);
 
 #ifdef __cplusplus
 }
@@ -493,5 +585,4 @@ extern void             cpuid_set_info(void);
 
 #endif /* ASSEMBLER */
 
-#endif /* __APPLE_API_PRIVATE */
 #endif /* _MACHINE_CPUID_H_ */
